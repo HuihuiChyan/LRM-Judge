@@ -1,0 +1,4 @@
+CLAUDE.md
+.claude/
+.spec-workflow/
+__pycache__/
