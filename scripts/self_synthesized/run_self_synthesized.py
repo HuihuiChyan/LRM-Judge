@@ -35,30 +35,24 @@ API_ERROR_OUTPUT = "$ERROR$"
 # Prompt Templates
 # ============================================================================
 
-SYSTEM_PROMPT = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user question displayed below based on specified key aspects.
+SYSTEM_PROMPT = """You are an impartial judge evaluating AI assistant responses."""
 
-Begin your evaluation by comparing the two responses and provide a short explanation."""
+USER_PROMPT_TEMPLATE = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user question displayed below. Your evaluation should be performed by following the provided evaluation plan step-by-step. Avoid copying the plan when doing the evaluation. Please also only stick to the given plan and provide explanation of how the plan is executed to compare the two responses. Avoid any position biases and ensure that the order in which the responses were presented does not influence your decision. Do not allow the length of the responses to influence your evaluation. Do not favor certain names of the assistants. Be as objective as possible. After providing your evaluation, output your final verdict by strictly following this format: "[[A]]" if assistant A is better, "[[B]]" if assistant B is better.
 
-USER_PROMPT_TEMPLATE = """**Question:**
+[User Question]
 {prompt}
 
-**Response A:**
+[The Start of Assistant A's Answer]
 {response_a}
+[The End of Assistant A's Answer]
 
-**Response B:**
+[The Start of Assistant B's Answer]
 {response_b}
+[The End of Assistant B's Answer]
 
-**Key Evaluation Aspects:**
-{key_aspects}
-
-Please evaluate which response is better based on the key aspects listed above. Consider normal factors like accuracy, helpfulness, clarity, and adherence to the specified evaluation criteria.
-
-After providing your explanation, your response must end with EXACTLY ONE of the following formats on a new line:
-- "[[A]]" if Response A is better
-- "[[B]]" if Response B is better
-- "[[C]]" if both responses are equally good/bad or the question is unclear
-
-Do not include any other text after the final verdict."""
+[The Start of Evaluation Plan]
+{evaluation_plan}
+[The End of Evaluation Plan]"""
 
 
 # ============================================================================
@@ -86,22 +80,19 @@ def process_judgement(output: str) -> Tuple[Optional[int], str]:
 
     Returns:
         (score, raw_output)
-        score: 1 表示 chosen 更好, 0 表示 rejected 更好, 0.5 表示平局, None 表示解析失败
+        score: "A" 表示 A 更好, "B" 表示 B 更好, None 表示解析失败
     """
     # 提取最后的判决标记
-    matches = re.findall(r"\[\[([ABC])\]\]", output)
+    matches = re.findall(r"\[\[([AB])\]\]", output)
     if not matches:
         return None, output
 
     verdict = matches[-1]  # 取最后一个匹配
 
     if verdict == "A":
-        # 需要根据 shuffle 判断 A 是 chosen 还是 rejected
         return "A", output
     elif verdict == "B":
         return "B", output
-    elif verdict == "C":
-        return 0.5, output
     else:
         return None, output
 
@@ -197,14 +188,6 @@ def chat_completion_openai(
     return API_ERROR_OUTPUT, ""
 
 
-def format_key_aspects(aspects: List[str]) -> str:
-    """格式化关键评估方面为列表"""
-    if not aspects or aspects == ["parsing_failed"] or aspects == ["api_error"]:
-        return "- Overall quality and appropriateness"
-
-    return "\n".join(f"- {aspect}" for aspect in aspects)
-
-
 def get_judgement(
     client: OpenAI,
     model: str,
@@ -219,10 +202,10 @@ def get_judgement(
     Args:
         client: OpenAI 客户端
         model: 模型名称
-        item: 数据项，包含 prompt, chosen, rejected, key_focus_aspects 等字段
+        item: 数据项,包含 prompt, chosen, rejected, evaluation_plan 等字段
         max_tokens: 最大生成 token 数
-        is_reasoning_model: 是否为推理模型（会自动添加 thinking_budget=16384）
-        test_mode: 测试模式，如果为 True 会输出每条数据的模型输出
+        is_reasoning_model: 是否为推理模型(会自动添加 thinking_budget=16384)
+        test_mode: 测试模式,如果为 True 会输出每条数据的模型输出
 
     Returns:
         包含评判结果的字典
@@ -236,15 +219,17 @@ def get_judgement(
         response_a = item["chosen"]
         response_b = item["rejected"]
 
-    # 格式化关键评估方面
-    key_aspects = format_key_aspects(item.get("key_focus_aspects", []))
+    # 获取评估计划
+    evaluation_plan = item.get("evaluation_plan", "")
+    if not evaluation_plan or evaluation_plan in ["parsing_failed", "api_error"]:
+        evaluation_plan = "Evaluate the responses based on overall quality, accuracy, helpfulness, and appropriateness."
 
     # 构建提示
     user_prompt = USER_PROMPT_TEMPLATE.format(
         prompt=item["prompt"],
         response_a=response_a,
         response_b=response_b,
-        key_aspects=key_aspects,
+        evaluation_plan=evaluation_plan,
     )
 
     messages = [
@@ -276,11 +261,9 @@ def get_judgement(
     # 根据 shuffle 转换判决结果为最终得分
     score = None
     if verdict == "A":
-        score = 0 if shuffle else 1  # A 是 rejected 则为 0，否则为 1
+        score = 0 if shuffle else 1  # A 是 rejected 则为 0,否则为 1
     elif verdict == "B":
-        score = 1 if shuffle else 0  # B 是 chosen 则为 1，否则为 0
-    elif verdict == 0.5:
-        score = 0.5
+        score = 1 if shuffle else 0  # B 是 chosen 则为 1,否则为 0
 
     # 构建返回结果
     result = {

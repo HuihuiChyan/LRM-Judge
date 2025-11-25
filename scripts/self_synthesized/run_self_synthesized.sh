@@ -9,8 +9,8 @@ python scripts/self_synthesized/run_self_synthesized.py \
     --model $model \
     --api_key "sk-scfdkliuvgltrqylrvkrqwjkbslazoeicflcocwdsgutuybo" \
     --api_base "https://api.siliconflow.cn/v1" \
-    --data_file "datasets/offsetbias/offsetbias_`basename $model`.jsonl" \
-    --concurrency 16 \
+    --data_file "datasets/rewardbench/rewardbench_`basename $model`.jsonl" \
+    --concurrency 40 \
     --reasoning_model
     # --max_tokens 4096 \
     # --test_size 20
