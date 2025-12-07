@@ -27,6 +27,7 @@ from tqdm import tqdm
 
 # 从 self_synthesized 导入相同的配置
 import sys
+
 sys.path.append(str(Path(__file__).parent.parent / "self_synthesized"))
 from run_self_synthesized import (
     API_MAX_RETRY,
@@ -36,6 +37,9 @@ from run_self_synthesized import (
     extract_reasoning,
     load_jsonl,
     save_jsonl,
+    load_existing_results,
+    _generate_item_key,
+    filter_dataset_with_restore,
 )
 
 # ============================================================================
@@ -141,7 +145,9 @@ def get_judgement(
     # 测试模式下输出模型响应
     if test_mode:
         print("\n" + "=" * 80)
-        print(f"📝 Item ID: {item.get('id', 'N/A')} | Section: {item.get('section', 'N/A')}")
+        print(
+            f"📝 Item ID: {item.get('id', 'N/A')} | Section: {item.get('section', 'N/A')}"
+        )
         print("=" * 80)
         print("**模型输出:**")
         print(output)
@@ -203,7 +209,13 @@ def evaluate_dataset(
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         future_to_index = {
             executor.submit(
-                get_judgement, client, model, item, max_tokens, is_reasoning_model, test_mode
+                get_judgement,
+                client,
+                model,
+                item,
+                max_tokens,
+                is_reasoning_model,
+                test_mode,
             ): i
             for i, item in enumerate(dataset)
         }
@@ -269,6 +281,12 @@ def main():
     parser.add_argument(
         "--test_size", type=int, default=None, help="测试条数(用于调试)"
     )
+    parser.add_argument(
+        "--restore",
+        type=lambda x: x.lower() == "true",
+        default=True,
+        help="是否恢复已有结果（默认 True）",
+    )
 
     args = parser.parse_args()
 
@@ -307,6 +325,22 @@ def main():
     print(f"Concurrency: {args.concurrency}")
     print(f"Output: {output_path}\n")
 
+    # Restore 模式：加载已有结果并过滤
+    already_processed = []
+    if args.restore:
+        existing_results = load_existing_results(output_path)
+        if existing_results:
+            dataset, already_processed = filter_dataset_with_restore(
+                dataset, existing_results
+            )
+            print(f"✓ Restore mode enabled:")
+            print(f"  - Found {len(already_processed)} existing results")
+            print(f"  - Need to process {len(dataset)} new items\n")
+        else:
+            print(f"✓ Restore mode enabled but no existing results found\n")
+    else:
+        print(f"✓ Restore mode disabled: processing all {len(dataset)} items\n")
+
     # 执行评估
     results = evaluate_dataset(
         client=client,
@@ -319,12 +353,21 @@ def main():
         output_path=output_path,
     )
 
+    # 合并已有结果和新处理的结果
+    if already_processed:
+        final_results = already_processed + results
+        print(
+            f"\n✓ Merged {len(already_processed)} existing + {len(results)} new = {len(final_results)} total results"
+        )
+    else:
+        final_results = results
+
     # 保存最终结果
-    save_jsonl(results, output_path)
+    save_jsonl(final_results, output_path)
     print(f"\n✓ Results saved to: {output_path}")
 
     # 统计失败案例
-    failed = sum(1 for r in results if r.get("score") is None)
+    failed = sum(1 for r in final_results if r.get("score") is None)
     if failed > 0:
         print(f"\n⚠ Warning: {failed} items failed to parse")
 
@@ -332,6 +375,8 @@ def main():
     print("\n" + "=" * 60)
     print("To analyze results, use the appropriate evaluation script:")
     print("  • RewardBench: python scripts/baseline/evaluate/evaluate_rewardbench.py")
+    print("  • JudgeBench:  python scripts/baseline/evaluate/evaluate_judgebench.py")
+    print("  • OffsetBias:  python scripts/baseline/evaluate/evaluate_offsetbias.py")
     print("=" * 60)
 
 
