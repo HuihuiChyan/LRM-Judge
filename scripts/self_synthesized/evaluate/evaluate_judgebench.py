@@ -20,7 +20,7 @@ from typing import Dict, List
 
 
 # 配置部分 - 直接在此修改文件路径
-RESULT_FILE = "results/run_synthesized_judgebench_QwQ-32B_QwQ-32B.jsonl"
+RESULT_FILE = "results/run_synthesized_judgebench_DeepSeek-R1_DeepSeek-R1.jsonl"
 
 # 定义子集分类规则
 SUBSET_CATEGORIES = {

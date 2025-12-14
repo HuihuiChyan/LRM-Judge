@@ -14,7 +14,7 @@ from typing import Dict, List
 
 
 # 配置部分 - 直接在此修改文件路径
-RESULT_FILE = "results/run_synthesized_rewardbench_deepseek-r1_deepseek-r1.jsonl"
+RESULT_FILE = "results/run_synthesized_rewardbench_DeepSeek-V3_DeepSeek-V3.jsonl"
 SECTIONS = ["Chat", "Chat Hard", "Safety", "Reasoning"]
 
 

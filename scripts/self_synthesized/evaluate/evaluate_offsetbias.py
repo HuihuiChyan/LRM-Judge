@@ -22,7 +22,9 @@ from typing import Dict, List
 
 
 # 配置部分 - 直接在此修改文件路径
-RESULT_FILE = "results/run_synthesized_offsetbias_DeepSeek-R1_DeepSeek-R1.jsonl"
+RESULT_FILE = (
+    "results/run_synthesized_offsetbias_deepseek-r1-250528_deepseek-r1-250528.jsonl"
+)
 
 # 定义bias类型顺序(按数据量排序)
 BIAS_ORDER = [
