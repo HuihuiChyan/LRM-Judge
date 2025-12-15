@@ -598,6 +598,9 @@ def main():
     print(
         "  • OffsetBias:  python scripts/self_synthesized/evaluate/evaluate_offsetbias.py"
     )
+    print(
+        "  • LLMBAR:      python scripts/self_synthesized/evaluate/evaluate_llmbar.py"
+    )
     print("=" * 60)
 
 
