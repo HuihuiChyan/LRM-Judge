@@ -20,7 +20,7 @@ from typing import Dict, List
 
 
 # 配置部分 - 直接在此修改文件路径
-RESULT_FILE = "results/run_synthesized_llmbar_qwq-32b_qwq-32b.jsonl"
+RESULT_FILE = "results/run_synthesized_llmbar_key_qwq-32b_qwq-32b.jsonl"
 
 # 定义subset顺序
 SUBSET_ORDER = ["neighbor", "gptinst", "gptout", "manual"]

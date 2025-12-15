@@ -89,7 +89,6 @@ def append_jsonl_item(item: Dict, file_path: Path, lock: asyncio.Lock):
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-
 def load_existing_results(file_path: Path) -> Dict[str, Dict]:
     """
     加载已有结果文件，构建查找字典
@@ -272,20 +271,28 @@ async def generate_evaluation_plan(
                     return item
 
                 # 解析失败，打印重试信息
-                print(f"⚠ Parsing failed for item {item.get('pair_id', 'unknown')} (attempt {attempt + 1}/{max_retries})")
+                print(
+                    f"⚠ Parsing failed for item {item.get('pair_id', 'unknown')} (attempt {attempt + 1}/{max_retries})"
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(15)  # 等待15秒后重试
                 else:
-                    print(f"❌ Parsing failed after {max_retries} attempts for item {item.get('pair_id', 'unknown')}")
+                    print(
+                        f"❌ Parsing failed after {max_retries} attempts for item {item.get('pair_id', 'unknown')}"
+                    )
                     item["evaluation_plan"] = "parsing_failed"
                     item["_raw_output"] = output
 
             except Exception as e:
-                print(f"⚠ API error for item {item.get('pair_id', 'unknown')} (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                print(
+                    f"⚠ API error for item {item.get('pair_id', 'unknown')} (attempt {attempt + 1}/{max_retries}): {str(e)}"
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(15)  # 等待15秒后重试
                 else:
-                    print(f"❌ API error after {max_retries} attempts for item {item.get('pair_id', 'unknown')}")
+                    print(
+                        f"❌ API error after {max_retries} attempts for item {item.get('pair_id', 'unknown')}"
+                    )
                     item["evaluation_plan"] = "api_error"
                     item["_error"] = str(e)
 
@@ -407,7 +414,9 @@ async def main():
     already_processed_count = len(existing_results)
 
     if existing_results:
-        all_data, already_processed_list = filter_dataset_with_restore(all_data, existing_results)
+        all_data, already_processed_list = filter_dataset_with_restore(
+            all_data, existing_results
+        )
         print(f"\n✓ Restore mode enabled:")
         print(f"  - Found {already_processed_count} existing results")
         print(f"  - Need to process {len(all_data)} new items")

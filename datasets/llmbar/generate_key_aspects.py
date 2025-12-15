@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-数据预处理脚本:为 LLMBar-Adversarial 每条数据生成评估计划(evaluation_plan)
+数据预处理脚本:为 LLMBar-Adversarial 每条数据生成评估重点关键词(key_focus_aspects)
 
 LLMBar-Adversarial 是对抗性评估数据集，包含四个子集：
 - Neighbor: 使用相近但不同的指令生成对抗输出
@@ -10,10 +10,10 @@ LLMBar-Adversarial 是对抗性评估数据集，包含四个子集：
 
 用法:
     # 测试模式 (每个 subset 取前5条)
-    python generate_evaluation_plan.py --model "gpt-4o-mini" --test_size 5
+    python generate_key_aspects.py --model "gpt-4o-mini" --test_size 5
 
     # 全量处理
-    python generate_evaluation_plan.py --model "gpt-4o-mini" --concurrency 15
+    python generate_key_aspects.py --model "gpt-4o-mini" --concurrency 15
 """
 
 import argparse
@@ -32,43 +32,39 @@ from tqdm.asyncio import tqdm
 # Prompt Templates
 # ============================================================================
 
-# SECTION_CONTEXT: Dict[str, str] = {
-#     "neighbor": """This task evaluates instruction-following accuracy under adversarial conditions.""",
-#     "gptinst": """This task evaluates the ability to correctly interpret subtle instruction variants.""",
-#     "gptout": """This task tests resistance to surface-quality deception.""",
-#     "manual": """This task evaluates instruction-following under diverse adversarial strategies.""",
-# }
+SYSTEM_PROMPT = """You are an evaluation expert. Your task is to analyze a question and two candidate responses, then identify 3-5 key evaluation aspects that should be focused on when judging these responses.
+
+Output ONLY a JSON array of strings, nothing else. Example: ["aspect1", "aspect2", "aspect3"]"""
 
 SECTION_CONTEXT = {
-    "neighbor": """This task evaluates instruction-following accuracy under adversarial conditions. The superior response directly and comprehensively addresses the given instruction, even if it appears less polished. The inferior response may seem well-formatted or concise but subtly deviates from the instruction or answers a slightly different question. Prioritize strict instruction adherence over superficial presentation quality. Be alert to responses that look good but don't answer what was actually asked.""",
-    "gptinst": """This task evaluates the ability to correctly interpret subtle instruction variants. The superior response demonstrates precise understanding of the specific instruction variant, even if the answer seems less elaborate. The inferior response may provide a sophisticated-looking answer but misinterprets nuances in the instruction wording. Focus on whether the response addresses the exact instruction given, not a similar but different one. Reject responses that answer the 'wrong version' of the question, regardless of their apparent quality.""",
-    "gptout": """This task tests resistance to surface-quality deception. The superior response provides correct, relevant information that directly answers the question, even if brief or simply formatted. The inferior response appears polished with elaborate formatting, longer length, and professional tone, but contains factual errors, irrelevant information, or fails to address the core question. Prioritize correctness and relevance over presentation aesthetics. Be highly suspicious of responses that 'look too good' - check if they actually deliver useful, accurate content.""",
-    "manual": """This task evaluates instruction-following under diverse adversarial strategies. The superior response accurately addresses the specific question asked, providing relevant and correct information. The inferior response employs deceptive tactics: generic answers to specific questions, verbose but off-topic content, misinterpretation of meta-instructions, or fabricated details. Carefully verify that responses answer the actual question asked, not a related but different one. Prioritize precision and relevance over apparent comprehensiveness or eloquence.""",
+    "neighbor": "This task evaluates instruction-following accuracy under adversarial conditions. ",
+    "gptinst": "This task evaluates the ability to correctly interpret subtle instruction variants.",
+    "gptout": "This task tests resistance to surface-quality deception.",
+    "manual": "This task evaluates instruction-following under diverse adversarial strategies.",
 }
 
-# 用户可以通过注释/取消注释以下两个 prompt 来控制是否给模型展示待评判的成对回复
-# INCLUDE_RESPONSES = True 会展示回复内容，False 则不展示
+# 控制是否在 prompt 中展示待评判的成对回复
 INCLUDE_RESPONSES = False
 
-USER_PROMPT_TEMPLATE_WITH_RESPONSES = """We want to evaluate the quality of the responses provided by AI assistants to the user question displayed below. For that, your task is to help us build an evaluation plan that can then be executed to assess the response quality. Whenever appropriate, you can choose to also include a step-by-step reference answer as part of the evaluation plan. Enclose your evaluation plan between the tags "[Start of Evaluation Plan]" and "[End of Evaluation Plan]".
+USER_PROMPT_TEMPLATE_WITH_RESPONSES = """{section_context}
 
-Evaluation Domain: {section_context}
+**Question:**
+{prompt}
 
-[User Question]
-{instruction}
+**Response A:**
+{chosen}
 
-[Response A]
-{response_a}
+**Response B:**
+{rejected}
 
-[Response B]
-{response_b}"""
+Observe the questions and paired answers that need to be evaluated. Then identify 3-5 key evaluation aspects for judging these responses. Output format: ["aspect1", "aspect2", "aspect3"]"""
 
-USER_PROMPT_TEMPLATE_WITHOUT_RESPONSES = """We want to evaluate the quality of the responses provided by AI assistants to the user question displayed below. For that, your task is to help us build an evaluation plan that can then be executed to assess the response quality. Whenever appropriate, you can choose to also include a step-by-step reference answer as part of the evaluation plan. Enclose your evaluation plan between the tags "[Start of Evaluation Plan]" and "[End of Evaluation Plan]".
+USER_PROMPT_TEMPLATE_WITHOUT_RESPONSES = """{section_context}
 
-Evaluation Domain: {section_context}
+**Question:**
+{prompt}
 
-[User Question]
-{instruction}"""
+Observe the question. Then identify 3-5 key evaluation aspects that should be focused on when judging responses to this question. Output format: ["aspect1", "aspect2", "aspect3"]"""
 
 
 # ============================================================================
@@ -80,6 +76,12 @@ def load_json(file_path: Path) -> List[Dict]:
     """加载JSON文件"""
     with open(file_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_jsonl(file_path: Path) -> List[Dict]:
+    """加载JSONL文件"""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
 def save_jsonl(data: List[Dict], file_path: Path):
@@ -96,16 +98,10 @@ def append_jsonl_item(item: Dict, file_path: Path, lock: asyncio.Lock):
     Args:
         item: 要保存的数据项
         file_path: 文件路径
-        lock: asyncio锁，确保并发写入安全
+        lock: asyncio锁，确保并发写入安全（在调用处使用）
     """
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
-
-
-def load_jsonl(file_path: Path) -> List[Dict]:
-    """加载JSONL文件"""
-    with open(file_path, "r", encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
 
 
 def load_existing_results(file_path: Path) -> Dict[str, Dict]:
@@ -194,25 +190,29 @@ def filter_dataset_with_restore(
     return to_process, already_processed
 
 
-def extract_evaluation_plan(text: str) -> Optional[str]:
-    """从文本中提取 evaluation plan"""
-    # 提取 [Start of Evaluation Plan] 和 [End of Evaluation Plan] 之间的内容
-    pattern = r"\[Start of Evaluation Plan\](.*?)\[End of Evaluation Plan\]"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+def extract_json_array(text: str) -> Optional[List[str]]:
+    """从文本中提取JSON数组"""
+    try:
+        result = json.loads(text.strip())
+        if isinstance(result, list) and all(isinstance(x, str) for x in result):
+            return result
+    except json.JSONDecodeError:
+        pass
 
-    if match:
-        result = match.group(1).strip()
-    else:
-        # 如果没有找到标记，返回整个文本作为 evaluation plan
-        result = text.strip()
+    # 正则提取兜底
+    matches = re.findall(r"\[(.*?)\]", text, re.DOTALL)
+    if matches:
+        try:
+            result = json.loads(f"[{matches[0]}]")
+            if isinstance(result, list) and all(isinstance(x, str) for x in result):
+                return result
+        except json.JSONDecodeError:
+            pass
 
-    # 剔除 <think></think> 标签及其内容（用于 DeepSeek-R1 等推理模型）
-    result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL | re.IGNORECASE)
-
-    return result.strip()
+    return None
 
 
-async def generate_evaluation_plan(
+async def generate_key_aspects(
     client: AsyncOpenAI,
     model: str,
     item: Dict,
@@ -220,7 +220,7 @@ async def generate_evaluation_plan(
     include_responses: bool = True,
     max_retries: int = 10,
 ) -> Dict:
-    """为单条数据生成评估计划"""
+    """为单条数据生成关键词"""
     subset = item["subset"]  # "neighbor", "gptinst", "gptout", "manual"
     section_context = SECTION_CONTEXT.get(subset, "This is a response evaluation task.")
 
@@ -228,13 +228,13 @@ async def generate_evaluation_plan(
     if include_responses:
         user_prompt = USER_PROMPT_TEMPLATE_WITH_RESPONSES.format(
             section_context=section_context,
-            instruction=item["input"],
-            response_a=item["output_1"],
-            response_b=item["output_2"],
+            prompt=item["prompt"],
+            chosen=item["chosen"],
+            rejected=item["rejected"],
         )
     else:
         user_prompt = USER_PROMPT_TEMPLATE_WITHOUT_RESPONSES.format(
-            section_context=section_context, instruction=item["input"]
+            section_context=section_context, prompt=item["prompt"]
         )
 
     async with semaphore:
@@ -242,30 +242,21 @@ async def generate_evaluation_plan(
             try:
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
                     temperature=0.7,
-                    max_tokens=8192,
+                    max_tokens=1024,
                 )
 
                 output = response.choices[0].message.content.strip()
-                evaluation_plan = extract_evaluation_plan(output)
+                key_aspects = extract_json_array(output)
 
-                if evaluation_plan:
-                    item["evaluation_plan"] = evaluation_plan
-                    # 转换为统一格式: prompt, chosen, rejected
-                    item["prompt"] = item["input"]
-                    # LLMBar 数据集中 label=1 表示 output_1 更好, label=2 表示 output_2 更好
-                    if item.get("label", 1) == 1:
-                        item["chosen"] = item["output_1"]
-                        item["rejected"] = item["output_2"]
-                    else:  # label == 2
-                        item["chosen"] = item["output_2"]
-                        item["rejected"] = item["output_1"]
-
-                    # 删除已转换的原始字段，只保留必要字段
-                    for key in ["input", "output_1", "output_2", "label"]:
-                        item.pop(key, None)
-
+                if key_aspects:
+                    item["key_focus_aspects"] = (
+                        key_aspects[:5] if len(key_aspects) > 5 else key_aspects
+                    )
                     return item
 
                 # 解析失败，打印重试信息
@@ -278,7 +269,7 @@ async def generate_evaluation_plan(
                     print(
                         f"❌ Parsing failed after {max_retries} attempts for item subset={item.get('subset', 'unknown')}"
                     )
-                    item["evaluation_plan"] = "parsing_failed"
+                    item["key_focus_aspects"] = ["parsing_failed"]
                     item["_raw_output"] = output
 
             except Exception as e:
@@ -291,7 +282,7 @@ async def generate_evaluation_plan(
                     print(
                         f"❌ API error after {max_retries} attempts for item subset={item.get('subset', 'unknown')}"
                     )
-                    item["evaluation_plan"] = "api_error"
+                    item["key_focus_aspects"] = ["api_error"]
                     item["_error"] = str(e)
 
     return item
@@ -315,7 +306,7 @@ async def process_all_data(
     file_lock = asyncio.Lock()  # 文件写入锁
 
     tasks = [
-        generate_evaluation_plan(client, model, item, semaphore, include_responses)
+        generate_key_aspects(client, model, item, semaphore, include_responses)
         for item in all_data
     ]
 
@@ -338,7 +329,7 @@ async def process_all_data(
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="生成评估计划 (LLMBar-Adversarial)")
+    parser = argparse.ArgumentParser(description="为LLMBar数据生成评估重点关键词")
     parser.add_argument(
         "--api_base", type=str, default=None, help="OpenAI API base URL"
     )
@@ -379,11 +370,27 @@ async def main():
         file_path = input_dir / subset_dir / "dataset.json"
         if file_path.exists():
             raw_data = load_json(file_path)
-            # 添加 subset 和 id 字段
+            # 添加 subset 和 id 字段，并转换为统一格式
             for item in raw_data:
+                # 添加元信息
                 item["subset"] = subset_dir.lower()
                 item["id"] = idx
                 idx += 1
+
+                # 转换为统一格式: prompt, chosen, rejected
+                item["prompt"] = item["input"]
+                # LLMBar 数据集中 label=1 表示 output_1 更好, label=2 表示 output_2 更好
+                if item.get("label", 1) == 1:
+                    item["chosen"] = item["output_1"]
+                    item["rejected"] = item["output_2"]
+                else:  # label == 2
+                    item["chosen"] = item["output_2"]
+                    item["rejected"] = item["output_1"]
+
+                # 删除已转换的原始字段
+                for key in ["input", "output_1", "output_2", "label"]:
+                    item.pop(key, None)
+
             all_data.extend(raw_data)
             print(f"Loaded {len(raw_data)} items from {subset_dir}")
         else:
@@ -395,14 +402,22 @@ async def main():
         print("No data to process")
         return
 
+    # 统计subset分布
+    subset_counts = {}
+    for item in all_data:
+        subset = item["subset"]
+        subset_counts[subset] = subset_counts.get(subset, 0) + 1
+
+    print("\nData distribution by subset:")
+    for subset, count in sorted(subset_counts.items()):
+        print(f"  {subset}: {count}")
+
     # 测试模式 - 按 subset 分层采样
     if args.test_size is not None:
-        # 统计每个 subset 的数据量
         subset_data = defaultdict(list)
         for item in all_data:
             subset_data[item["subset"]].append(item)
 
-        # 每个 subset 取前 N 条
         sampled_data = []
         for subset in sorted(subset_data.keys()):
             sampled = subset_data[subset][: args.test_size]
@@ -412,11 +427,11 @@ async def main():
         all_data = sampled_data
         print(f"\nTest mode: processing {len(all_data)} items total")
     else:
-        print(f"Full mode: processing {len(all_data)} items")
+        print(f"\nFull mode: processing {len(all_data)} items")
 
     # Restore模式：加载已有结果并过滤
     model_basename = os.path.basename(args.model)
-    output_path = Path(args.output_dir) / f"llmbar_{model_basename}.jsonl"
+    output_path = Path(args.output_dir) / f"llmbar_key_{model_basename}.jsonl"
 
     existing_results = load_existing_results(output_path)
     already_processed_count = len(existing_results)
@@ -449,7 +464,7 @@ async def main():
     failed = sum(
         1
         for r in final_results
-        if r.get("evaluation_plan") in ["parsing_failed", "api_error"]
+        if r.get("key_focus_aspects", [None])[0] in ["parsing_failed", "api_error"]
     )
 
     print(f"\n✓ Incremental save completed:")

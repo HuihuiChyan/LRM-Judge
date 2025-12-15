@@ -7,7 +7,7 @@
 
 model="qwq-32b"
 
-python scripts/self_synthesized/run_self_synthesized.py \
+python scripts/self_synthesized/run_self_synthesized_plan.py \
     --model $model \
     --api_base "https://yunwu.ai/v1" \
     --api_key "sk-P2O0bcaVTVKHqKYsdIdPUslTCXYymDWHlGzRuWIcYi3s62Bc" \
