@@ -6,11 +6,12 @@
 # --reasoning_model: 是否为推理模型
 
 model="qwq-32b"
+api_key="put-your-key-here"
 
 python scripts/self_synthesized/run_self_synthesized_plan.py \
     --model $model \
     --api_base "https://yunwu.ai/v1" \
-    --api_key "sk-P2O0bcaVTVKHqKYsdIdPUslTCXYymDWHlGzRuWIcYi3s62Bc" \
+    --api_key $api_key \
     --data_file "datasets/llmbar/llmbar_`basename $model`.jsonl" \
     --concurrency 40 \
     --restore true \
@@ -18,5 +19,4 @@ python scripts/self_synthesized/run_self_synthesized_plan.py \
     # --max_tokens 4096 \
     # --test_size 20
     # --reasoning_model
-    # --api_key "sk-scfdkliuvgltrqylrvkrqwjkbslazoeicflcocwdsgutuybo" \
     # --api_base "https://api.siliconflow.cn/v1" \

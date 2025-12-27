@@ -4,11 +4,12 @@
 # 例如: --test_size 10
 
 model="qwq-32b"
+api_key="put-your-key-here"
 
 python scripts/self_synthesized/run_self_synthesized_key.py \
     --model $model \
     --api_base "https://yunwu.ai/v1" \
-    --api_key "sk-P2O0bcaVTVKHqKYsdIdPUslTCXYymDWHlGzRuWIcYi3s62Bc" \
+    --api_key $api_key \
     --data_file "datasets/llmbar/llmbar_key_`basename $model`.jsonl" \
     --concurrency 50 \
     --reasoning_model
