@@ -1,6 +1,6 @@
 # LRM-as-a-Judge
 
-This repository contains the official implementation and datasets for our **ACL 2026** submission:
+This repository contains the official implementation and datasets for the Anonymous ARR 2026 January submission:
 > **"Reasoning Model Is Superior LLM-Judge, Yet Suffers from Biases"**
 
 ---
